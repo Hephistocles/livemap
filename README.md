@@ -16,16 +16,17 @@ Note that although these are cluster instructions, I'm actually only running on 
   b) Download a Storm release from [here](http://storm.apache.org/downloads.html). It should probably match the codebase? Not sure, but I'd go for 0.10.0 to be safe.
   c) Extract somewhere, and create a file conf/storm.yaml containing the following:
     
-    storm.zookeeper.servers:
-        - "localhost"
-    storm.local.dir: "~/"
-    nimbus.host: "localhost"
-    
-    ## Locations of the drpc servers
-    drpc.servers:
-        - "localhost"
+      storm.zookeeper.servers:
+          - "localhost"
+      storm.local.dir: "~/"
+      nimbus.host: "localhost"
+      
+      ## Locations of the drpc servers
+      drpc.servers:
+          - "localhost"
 
   Obviously if you're running multiple machines in your cluster things might look a little different, but the principle should be the same.
+  
   d) Run the various storm components. I did this using `screen` so that I could see the output of each command separately and restart them in-place if necessary. For production you'd want a script and a supervisor to revive them when they die. The four components I ran (I don't know if all are necessary) are:
   
       $ ./bin/storm nimbus
