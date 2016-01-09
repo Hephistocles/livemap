@@ -56,7 +56,7 @@
 (defn run-server! [^DRPCClient drpc]
   (let [server (mk-server drpc)]
     (.start server)
-    (println "Enter to continue.")
+    (println "Press Enter to quit.")
     (read-line)
     (.stop server)
     (System/exit 0)))

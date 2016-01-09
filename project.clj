@@ -12,8 +12,7 @@
                  [ring/ring-jetty-adapter "1.2.1"]
                  [ring/ring-json "0.3.1"]
                  [compojure "1.1.8"]
-                 [cheshire "5.5.0"]
-                 ]
+                 [cheshire "5.5.0"]]
   :target-path "target/%s"
   :profiles {
              :provided {:dependencies [[org.apache.storm/storm-core "0.10.0"]]}})

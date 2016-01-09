@@ -32,12 +32,6 @@
                   (doseq [word words]
                     (t/emit-fn coll word))))
 
-;; define a trident function which just prints the tuple and passes it on
-(t/deftridentfn printer
-                [tuple coll]
-                (do (println tuple)
-                    (t/emit-fn coll (t/first tuple))))
-
 ;; define an aggregator to count words
 (t/defcombineraggregator count-words
   ;; the first overload is called if there are no tuples in the partition
@@ -51,18 +45,6 @@
      ([] [])
      ([tuple] [{(keyword (t/get tuple :word)) (or (t/get tuple :count) 0)}])
      ([t1 t2] (concat t1 t2)))
-
-
-(defn mk-fixed-batch-spout [max-batch-size]
-  (FixedBatchSpout.
-    (t/fields "message")
-    max-batch-size
-    (into-array (map t/values '("i don't care"
-                                 "the man went to the store and bought some candy"
-                                 "four score and seven years ago"
-                                 "how many can you eat"
-                                 "to be or not to be the person")))))
-
 
 (defn build-topology
   "build a topology containing two main streams - one reading from an activeMQ spout which will process incoming
@@ -103,11 +85,9 @@
                           ["word"]
                           (MapGet.)
                           ["count"])
-           (t/debug)
            (t/aggregate ["word" "count"]
                    mapify
                    ["count-map"])
-           (t/debug)
            )
        (.build trident-topology)))))
 
