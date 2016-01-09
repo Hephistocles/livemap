@@ -1,38 +1,154 @@
 (ns main.java.testclj.marceline-test
   (:require [marceline.storm.trident :as t]
+            [clamq.protocol.connection :as connection :only [producer]]
+            [clamq.protocol.producer :as producer]
             [clojure.string :as string :only [split]])
-  (:use [backtype.storm clojure config])
+  (:use [backtype.storm clojure config]
+        clamq.activemq
+        org.httpkit.server)
   (:import [storm.trident TridentTopology]
-           [backtype.storm StormSubmitter])
+           [backtype.storm StormSubmitter LocalCluster LocalDRPC]
+           (backtype.storm.contrib.jms TridentJmsSpout)
+           (javax.jms Session)
+           (main.java.testclj SimpleJmsProvider SimpleTupleProducer)
+           (storm.trident.testing MemoryMapState$Factory FixedBatchSpout)
+           (storm.trident.operation.builtin MapGet))
   (:gen-class))
 
-;; define a trident function which adds exclamation marks to the first element of the input tuple
-(t/deftridentfn exlaimer-fn
+
+;; define a trident spout which will connect to a local JMS/ActiveMQ queue and consume messages from it
+(defn mk-mq-spout []
+  (doto (TridentJmsSpout.)
+    (.named "jmsSpout")
+    (.withJmsAcknowledgeMode Session/AUTO_ACKNOWLEDGE)
+    (.withJmsProvider (SimpleJmsProvider. "tcp://localhost:61616" "testerman"))
+    (.withTupleProducer (SimpleTupleProducer.))))
+
+;; define a trident function which splits the input by spaces
+(t/deftridentfn split-args
                 [tuple coll]
-                (t/emit-fn coll (str (t/first tuple) "!!!!"))
-                )
+                (let [words (string/split (t/first tuple) #" ")]
+                  ;; emit a new tuple for each word in the sentence
+                  (doseq [word words]
+                    (t/emit-fn coll word))))
+
+;; define a trident function which just prints the tuple and passes it on
+(t/deftridentfn printer
+                [tuple coll]
+                (do (println tuple)
+                    (t/emit-fn coll (t/first tuple))))
+
+;; define an aggregator to count words
+(t/defcombineraggregator
+  count-words
+  ;; the first overload is called if there are no tuples in the partition
+  ([] 0)
+  ;; the second overload is called is run on each input tuple to get a value
+  ([tuple] 1)
+  ;; the third overload is called to combine values until there is only one left
+  ([t1 t2] (+ t1 t2)))
+
+
+(defn mk-fixed-batch-spout [max-batch-size]
+  (FixedBatchSpout.
+    (t/fields "message")
+    max-batch-size
+    (into-array (map t/values '("i don't care"
+                                 "the man went to the store and bought some candy"
+                                 "four score and seven years ago"
+                                 "how many can you eat"
+                                 "to be or not to be the person")))))
+
 
 (defn build-topology
-  "build a topology containing our trident functions embedded within a drpc stream"
-  ([]
+  "build a topology containing two main streams - one reading from an activeMQ spout which will process incoming
+  data (produced onto the queue by a separate REST server), and one responding to DRPC calls for querying."
+  ([drpc]
     ;; first define an empty topology
    (let [trident-topology (TridentTopology.)]
-     ;; create a DRPC stream within the topology called "words"
-     (-> (t/drpc-stream trident-topology "words")
-         ;; for every item in the stream, add exclamation marks
-         (t/each ["args"]
-                 exclaimer-fn
-                 ["word"])
-         ;; t/each will append the result to the input tuple, so here
-         ;; I project onto "word" so that the original input tuple disappears
-         (t/project ["word"]))
-     ;; finally "build" this topology for submission
-     (.build trident-topology))))
+     ;; the collect-stream reads data from an activemq queue, which will have content produced by our REST server
+     (let [
+           ;collect-stream  (t/new-stream trident-topology "word-counts" (mk-fixed-batch-spout 3))
+           collect-stream (t/new-stream trident-topology "words" (mk-mq-spout))
+           query-stream (t/drpc-stream trident-topology "counts" drpc)
+           word-counts (-> collect-stream
+                           ;; for every item in the stream split into words
+                           (t/each ["message"]
+                                   split-args
+                                   ["word"])
+                           ;; tuples will look like ["the" ["the foo the" "the foo the"]] ["foo" ["the foo the"]
+                           ;; so strip the original input and just retain "the" "foo"
+                           (t/project ["word"])
+                           ;; Group this stream by `word`
+                           (t/group-by ["word"])
+                           ;; aggregate stream items using count-words and persist the results using an in-memory hashmap
+                           (t/persistent-aggregate (MemoryMapState$Factory.)
+                                                   ["word"]
+                                                   count-words
+                                                   ["count"])
+                           )
+           ]
+       ;; finally use the drpc stream to respond to queries
+       (-> query-stream
+           (t/each ["args"]
+                   split-args
+                   ["word"])
+           (t/project ["word"])
+           (t/group-by ["word"])
+           (t/state-query word-counts
+                          ["word"]
+                          (MapGet.)
+                          ["count"]))
+       (.build trident-topology)))))
+
+(defn test [drpc]
+  (println "Would you like to test? [y/n]")
+  (let [v (read-line)]
+    (cond
+      (= "y" v)
+      (do
+        (println "What would you like to process?")
+        (let [connection (activemq-connection "tcp://localhost:61616")
+              producer (connection/producer connection)
+              input (read-line)]
+          (producer/publish producer "testerman" input))
+
+        ;; queries come from DRPC
+        (Thread/sleep 1000)
+        (println "Now what is your query?")
+        (println (.execute drpc "counts" (read-line)))
+
+        ;; invite the user to restart
+        (recur drpc))
+      (= "n" v) 0
+      :else (recur drpc)
+      )))
 
 (defn -main
   "Submit a topology to the cluster. Will be called after running `bin/storm jar`"
-  ([name]
+
+  ([] ; this is for running locally
+
+    ;; set up the cluster and build the topology
+   (println "Setting up...")
+   (let [cluster (LocalCluster.)
+         drpc (LocalDRPC.)]
+     (.submitTopology cluster "wordcounter"
+                      {}
+                      (build-topology drpc))
+
+     ;; since it's local we can test it. Stuff comes from an activemq queue, so we can produce content here.
+     (Thread/sleep 3000)
+     (test drpc)
+     (println "Done testing then")
+      (.shutdown cluster)
+     (System/exit 0)
+       ))
+
+  ([name] ; this is for running on the cluster
    (StormSubmitter/submitTopology name
                                   ;; for now I don't have any special config
                                   {}
-                                  (build-topology))))
+                                  (build-topology nil))))
+
+(-main)
