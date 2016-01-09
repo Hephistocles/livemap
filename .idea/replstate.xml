@@ -1,4 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project version="4">
-  <component name="ReplState" timestamp="1451952209427">{:repl-history {:ide [], :local [&quot;\&quot;Hello wordl\&quot;&quot; &quot;(+ 1 2)&quot; &quot;(-main)&quot; &quot;(mapset)&quot; &quot;(defn)&quot; &quot;(defn test \&quot;foo\&quot; [x] (+x 1))&quot; &quot;(defn mytest \&quot;foo\&quot; [x] (+x 1))&quot; &quot;(defn mytest \&quot;foo\&quot; [x] (+ x 1))&quot; &quot;(defn mapset\n  \&quot;Maps a function and returns the result as a set\&quot;\n  [f l]\n  (set (map f l)))&quot;], :remote []}}</component>
-</project>

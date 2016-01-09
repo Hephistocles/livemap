@@ -2,10 +2,10 @@
   (:require [marceline.storm.trident :as t]
             [clamq.protocol.connection :as connection :only [producer]]
             [clamq.protocol.producer :as producer]
-            [clojure.string :as string :only [split]])
+            [clojure.string :as string :only [split]]
+            [main.java.testclj.server :refer [run-server!]])
   (:use [backtype.storm clojure config]
-        clamq.activemq
-        org.httpkit.server)
+        clamq.activemq)
   (:import [storm.trident TridentTopology]
            [backtype.storm StormSubmitter LocalCluster LocalDRPC]
            (backtype.storm.contrib.jms TridentJmsSpout)
@@ -39,14 +39,18 @@
                     (t/emit-fn coll (t/first tuple))))
 
 ;; define an aggregator to count words
-(t/defcombineraggregator
-  count-words
+(t/defcombineraggregator count-words
   ;; the first overload is called if there are no tuples in the partition
   ([] 0)
   ;; the second overload is called is run on each input tuple to get a value
   ([tuple] 1)
   ;; the third overload is called to combine values until there is only one left
   ([t1 t2] (+ t1 t2)))
+
+(t/defcombineraggregator mapify
+     ([] [])
+     ([tuple] [{(keyword (t/get tuple :word)) (or (t/get tuple :count) 0)}])
+     ([t1 t2] (concat t1 t2)))
 
 
 (defn mk-fixed-batch-spout [max-batch-size]
@@ -98,31 +102,14 @@
            (t/state-query word-counts
                           ["word"]
                           (MapGet.)
-                          ["count"]))
+                          ["count"])
+           (t/debug)
+           (t/aggregate ["word" "count"]
+                   mapify
+                   ["count-map"])
+           (t/debug)
+           )
        (.build trident-topology)))))
-
-(defn test [drpc]
-  (println "Would you like to test? [y/n]")
-  (let [v (read-line)]
-    (cond
-      (= "y" v)
-      (do
-        (println "What would you like to process?")
-        (let [connection (activemq-connection "tcp://localhost:61616")
-              producer (connection/producer connection)
-              input (read-line)]
-          (producer/publish producer "testerman" input))
-
-        ;; queries come from DRPC
-        (Thread/sleep 1000)
-        (println "Now what is your query?")
-        (println (.execute drpc "counts" (read-line)))
-
-        ;; invite the user to restart
-        (recur drpc))
-      (= "n" v) 0
-      :else (recur drpc)
-      )))
 
 (defn -main
   "Submit a topology to the cluster. Will be called after running `bin/storm jar`"
@@ -138,12 +125,9 @@
                       (build-topology drpc))
 
      ;; since it's local we can test it. Stuff comes from an activemq queue, so we can produce content here.
-     (Thread/sleep 3000)
-     (test drpc)
-     (println "Done testing then")
-      (.shutdown cluster)
-     (System/exit 0)
-       ))
+     (Thread/sleep 4000)
+     (println "Ready!")
+     (run-server! drpc)))
 
   ([name] ; this is for running on the cluster
    (StormSubmitter/submitTopology name
