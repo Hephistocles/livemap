@@ -1,0 +1,33 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+	<style>
+		body {
+			margin: 0px;
+			padding: 0px;
+		}
+	</style>
+
+	<script src="https://code.jquery.com/jquery-2.2.0.min.js"></script>
+	<script>
+		$(document).ready(function() {
+			var t = (new Date()).getTime();
+			$.ajax({
+				url: "http://localhost:3000?size=1024 768",
+			    'type': 'GET',
+				success: function(msg){
+				    $("img").attr("src", "data:image/png;base64," + JSON.parse(msg)[0][0]);
+				    console.log("Latency = " + ((new Date()).getTime() - t))
+				},
+				error: function(XMLHttpRequest, textStatus, errorThrown) {
+					console.log("some error");
+				}
+			});
+		})
+	</script>
+</head>
+<body>
+<img id="map" style="position:absolute;"/>
+<iframe width="1024" height="768" src="wiki.html">
+</body>
+</html>
