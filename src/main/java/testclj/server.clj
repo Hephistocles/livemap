@@ -14,9 +14,8 @@
 (def producer (connection/producer connection))
 
 (defn post-data [req]
-  (if-let [msg (or (get-in req [:params :msg])
-                            (get-in req [:body :msg]))]
-             (do (producer/publish producer "testerman" msg)
+  (if-let [msg (:body req)]
+             (do (producer/publish producer "testerman" (generate-string msg))
                  {:status 200
                   :body   {:msg msg :success true}})
              {:status 401
@@ -24,17 +23,10 @@
 
 (defn mk-query-data [drpc]
   (fn [req]
-     (if-let [qry (or (get-in req [:params :query])
-                      (get-in req [:body :query]))]
-       (let [json-results (parse-string (.execute drpc "counts" qry)
-                                        ;; this is ugly but I'm fed up of trying to get keywords mapping to strings correctly!
-                                        (fn [k] (subs k 1)))]
+       (let [png-string (.execute drpc "counts" (:size (:params req)))]
          {:status 200
-          :body   {:counts
-                   ;; this is ugly too but again cba
-                   (first (first json-results))}})
-       {:status 401
-        :body   {:success false :desc "No message was received"}})))
+          :headers {"Content-Type" "text/plain; charset=utf-8"}
+          :body   png-string})))
 
 (defn mk-routes [drpc]
   (routes
